@@ -1,0 +1,691 @@
+// game.js
+
+let game;
+let fontZombie, fontArial;
+let imgCache = {};
+
+function preload() {
+  fontZombie = loadFont("fonts/Zombie_Holocaust.ttf");
+  fontArial  = loadFont("fonts/Arial.ttf");
+
+  imgCache["intro"] = loadImage("imagens/assets/intro.jpg");
+  imgCache["exit"]  = loadImage("imagens/assets/wall/exit.png");
+  for (let i = 1; i <= 3; i++) imgCache[`wall${i}`]  = loadImage(`imagens/assets/wall/wall${i}.png`);
+  for (let i = 1; i <= 8; i++) imgCache[`floor${i}`] = loadImage(`imagens/assets/floor/${i}.png`);
+
+  imgCache["hamburguer"] = loadImage("imagens/assets/itens/hamburguer.png");
+  imgCache["coke"]       = loadImage("imagens/assets/itens/coke.png");
+
+  const breakFrames = [2, 2, 3, 3, 3];
+  for (let f = 1; f <= 5; f++)
+    for (let i = 1; i <= breakFrames[f - 1]; i++)
+      imgCache[`break${f}_${i}`] = loadImage(`imagens/assets/breakable/${f}/${i}.png`);
+
+  for (let i = 1; i <= 6; i++) imgCache[`char_idle_${i}`]   = loadImage(`imagens/char/idle/${i}.png`);
+  for (let i = 1; i <= 2; i++) imgCache[`char_attack_${i}`] = loadImage(`imagens/char/attack/${i}.png`);
+  for (let i = 1; i <= 2; i++) imgCache[`char_hurt_${i}`]   = loadImage(`imagens/char/hurt/${i}.png`);
+
+  for (let t = 0; t <= 1; t++) {
+    for (let i = 1; i <= 6; i++) imgCache[`zombie${t}_idle_${i}`]   = loadImage(`imagens/enemies/zombie${t}/idle/${i}.png`);
+    for (let i = 1; i <= 2; i++) imgCache[`zombie${t}_attack_${i}`] = loadImage(`imagens/enemies/zombie${t}/attack/${i}.png`);
+  }
+}
+
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  frameRate(6);
+  game = new Game();
+}
+
+function draw() {
+  background(0);
+  noTint(); // garante que nenhum tint vaza entre frames
+
+  if (game.intro) {
+    game.Intro();
+    return;
+  }
+  if (game.endGame) {
+    game.GameOver();
+    return;
+  }
+  if (game.levelDone) {
+    game.NextLevel();
+    return;
+  }
+  if (game.help) {
+    game.ShowHelp();
+    return;
+  }
+  if (game.paused) {
+    game.Paused();
+    return;
+  }
+
+  // ---- estado de jogo ativo ----
+
+  // 1) Lógica dos inimigos — pausada durante o banner de dia
+  if (!game.dayMessage) {
+    game.TickEnemies();
+    if (game.endGame) return;
+  }
+
+  // 2) Desenho do mundo com translate isolado em push/pop
+  push();
+  translate(game.board.offsetX, game.board.offsetY);
+  game.board.BackGround(128);
+  game.ShowLevel();
+  pop();
+
+  // 3) Flash vermelho de dano
+  if (game.level.character.hurtTimer > 0) {
+    noStroke();
+    fill(180, 0, 0, 120);
+    rect(0, 0, width, height);
+    game.level.character.hurtTimer--;
+  }
+
+  // 4) Banner "Dia X" — overlay escuro com texto, some após timer
+  if (game.dayMessage) {
+    noStroke();
+    fill(0, 0, 0, 180);
+    rect(0, 0, width, height);
+    // "DIA" em fontZombie (sem número, pois a fonte não tem algarismos)
+    game.message.setText(fontZombie, 180, CENTER, [139, 0, 0]);
+    game.message.show("Dia", width / 2 - 80, height / 2 - 30);
+    // número em fontArial ao lado
+    game.message.setText(fontArial, 160, LEFT, [139, 0, 0]);
+    game.message.show(String(game.day), width / 2 + 60, height / 2 - 30);
+    game.message.setText(fontArial, 36, CENTER, [255, 255, 255]);
+    game.message.show("Sobreviva e chegue à saída!", width / 2, height / 2 + 110);
+    game.message.setText(fontArial, 24, CENTER, [160, 160, 160]);
+    game.message.show("Clique para continuar", width / 2, height / 2 + 170);
+    game._dayMsgTimer--;
+    if (game._dayMsgTimer <= 0) game.dayMessage = false;
+  }
+
+  game.CheckScore();
+}
+
+function keyPressed() {
+  if (!game.intro && !game.paused && !game.endGame && !game.help && !game.levelDone && !game.dayMessage) {
+    if (keyCode === UP_ARROW || keyCode === DOWN_ARROW || keyCode === LEFT_ARROW || keyCode === RIGHT_ARROW) {
+      game.MoveCharacter(keyCode);
+    }
+    if (key === 'A' || key === 'a') {
+      game.CharAttack();
+    }
+  }
+  if (key === 'R' || key === 'r') game.Restart();
+  if (keyCode === 112) game.help = true;
+}
+
+function mousePressed() {
+  if (game.intro) {
+    game.intro = false;
+  } else if (game.help) {
+    game.help = false;
+  } else if (game.endGame) {
+    game.Restart();
+    game.intro = true;
+  } else if (game.dayMessage) {
+    // Clique dispensa o banner do dia imediatamente
+    game.dayMessage = false;
+  } else {
+    game.paused = !game.paused;
+  }
+}
+
+// -------------------- Classes --------------------
+
+class Level {
+  constructor(numero, numItens, numEnemies, board) {
+    this.numero      = numero;
+    this.numItens    = numItens;
+    this.numEnemies  = numEnemies;
+    this.numBreakables = board.cols * 2;
+    this.board       = board;
+    this.itens       = [];
+    this.enemies     = [];
+    this.breakables  = [];
+
+    this.character = new Character(2, this.board.rows - 3, 6, 2, 2, this.board.pixelSize);
+    this.board.boardMatrix[this.board.rows - 3][2] = 2;
+
+    let i = 0;
+    while (i < this.numItens) {
+      let x = int(random(3, board.cols - 2));
+      let y = int(random(2, board.rows - 2));
+      if (board.boardMatrix[y][x] === 0) {
+        board.boardMatrix[y][x] = 3;
+        let tipo = random() > 0.5 ? "hamburguer" : "coke";
+        let pts  = tipo === "hamburguer" ? 20 : 10;
+        this.itens.push(new Consumable(x, y, board.pixelSize, pts, tipo));
+        i++;
+      }
+    }
+
+    const breakFrames = [2, 2, 3, 3, 3];
+    i = 0;
+    while (i < this.numBreakables) {
+      let x = int(random(2, board.cols - 2));
+      let y = int(random(2, board.rows - 2));
+      if (board.boardMatrix[y][x] === 0) {
+        board.boardMatrix[y][x] = 5;
+        let folder = int(random(1, 6));
+        let frames = breakFrames[folder - 1];
+        this.breakables.push(new Breakable(x, y, board.pixelSize, frames, folder));
+        i++;
+      }
+    }
+
+    i = 0;
+    while (i < this.numEnemies) {
+      let x = int(random(4, board.cols - 2));
+      let y = int(random(2, board.rows - 2));
+      if (board.boardMatrix[y][x] === 0) {
+        board.boardMatrix[y][x] = 4;
+        let type = int(random(0, 2));
+        this.enemies.push(new Enemie(x, y, 6, 2, type, board.pixelSize));
+        i++;
+      }
+    }
+  }
+
+  getConsumable(x, y) { return this.itens.find(it => it.posX === x && it.posY === y); }
+  getEnemie(x, y)     { return this.enemies.find(e => e.posX === x && e.posY === y); }
+  getBreakable(x, y)  { return this.breakables.find(b => b.posX === x && b.posY === y); }
+}
+
+class Base {
+  constructor(x, y, pixelSize) {
+    this.posX = x;
+    this.posY = y;
+    this.pixelSize = pixelSize;
+  }
+}
+
+class TextControl {
+  constructor(style, size, align, color) { this.setText(style, size, align, color); }
+
+  setText(style, size, align, color) {
+    this.size  = size;
+    this.align = align;
+    this.color = color;
+    textFont(style, this.size);
+    textAlign(this.align);
+    fill(...this.color);
+  }
+
+  show(texto, x, y) {
+    fill(...this.color);
+    textAlign(this.align);
+    text(texto, x, y);
+  }
+}
+
+class GameBoard {
+  constructor(pixelSize) {
+    this.pixelSize = pixelSize;
+    this.cols   = floor(windowWidth  / pixelSize);
+    this.rows   = floor(windowHeight / pixelSize);
+    this.width  = this.cols * pixelSize;
+    this.height = this.rows * pixelSize;
+    this.offsetX = floor((windowWidth  - this.width)  / 2) - 1;
+    this.offsetY = floor((windowHeight - this.height) / 2) - 1;
+
+    this.boardMatrix = Array.from({ length: this.rows }, () => Array(this.cols).fill(0));
+    this.fundo = imgCache["intro"];
+    this.saida = imgCache["exit"];
+    this.wallSprites  = [];
+    this.floorSprites = [];
+
+    let mur = 0;
+    for (let i = 0; i < this.rows; i++) {
+      for (let j = 0; j < this.cols; j++) {
+        if (i === 0 || j === 0 || i === this.rows - 1 || j === this.cols - 1) {
+          this.boardMatrix[i][j] = 1;
+          mur++;
+        }
+      }
+    }
+
+    for (let i = 0; i < mur; i++)
+      this.wallSprites.push(imgCache[`wall${int(random(1, 4))}`]);
+
+    let tam = (this.cols - 1) * (this.rows - 1);
+    for (let i = 0; i < tam; i++)
+      this.floorSprites.push(imgCache[`floor${int(random(1, 9))}`]);
+  }
+
+  BackGround(value) {
+    if (value === 0) {
+      image(this.fundo, 0, 0, width, height);
+    } else {
+      background(value);
+      let z = 0, y = 0;
+      for (let i = 0; i < this.rows; i++) {
+        for (let j = 0; j < this.cols; j++) {
+          if (i === 0 || j === 0 || i === this.rows - 1 || j === this.cols - 1) {
+            image(this.wallSprites[z++], j * this.pixelSize, i * this.pixelSize);
+          } else {
+            image(this.floorSprites[y++], j * this.pixelSize, i * this.pixelSize);
+          }
+        }
+      }
+      image(this.saida, (this.cols - 1) * this.pixelSize, 2 * this.pixelSize);
+    }
+  }
+}
+
+class Game {
+  constructor() {
+    this.board      = new GameBoard(64);
+    this.intro      = true;
+    this.paused     = false;
+    this.endGame    = false;
+    this.levelDone  = false;
+    this.help       = false;
+    this.Score      = 200;
+    this.day        = 1;          // contador de dias sobrevividos
+    this.dayMessage = true;       // exibe "Dia X" no início de cada dia
+    this._dayMsgTimer = 90;       // duração em ms (90 * ~166ms ≈ 15s a 6fps)
+
+    this.message = new TextControl(fontZombie, 32, CENTER, [255, 0, 0]);
+    this.level   = new Level(1, this._itensForDay(), this._enemiesForDay(), this.board);
+
+    this._lastEnemyMove = millis();
+    this._enemyInterval = 800;
+  }
+
+  // Dificuldade escala com os dias
+  _itensForDay()   { return 3 + this.day; }
+  _enemiesForDay() { return 3 + this.day; }
+
+  Restart() {
+    this.help       = false;
+    this.intro      = false;
+    this.paused     = false;
+    this.endGame    = false;
+    this.levelDone  = false;
+    this.Score      = 200;
+    this.day        = 1;
+    this.dayMessage = true;
+    this._dayMsgTimer = 90;
+    this.board      = new GameBoard(64);
+    this.level      = new Level(1, this._itensForDay(), this._enemiesForDay(), this.board);
+    this._lastEnemyMove = millis();
+  }
+
+  Intro() {
+    this.board.BackGround(0);
+    this.message.setText(fontZombie, 150, CENTER, [139, 0, 0]);
+    this.message.show("ZUMBIS",      width / 2, 150);
+    this.message.show("COMERAM MEU", width / 2, 325);
+    this.message.show("HAMBURGUER",  width / 2, 500);
+    this.message.setText(fontArial, 40, CENTER, [255, 255, 255]);
+    this.message.show("Clique para começar!", width / 2, 650);
+    this.message.show("Desenvolvido por José Antonio Gallo Junior", width / 2, 700);
+  }
+
+  ShowHelp() {
+    this.board.BackGround(0);
+    this.message.setText(fontZombie, 150, CENTER, [139, 0, 0]);
+    this.message.show("ajuda", width / 2, 200);
+    this.message.setText(fontArial, 40, CENTER, [255, 255, 255]);
+    this.message.show("Atravesse o cenário e chegue à Saída",       width / 2, height / 2);
+    this.message.show("Use as setas para movimentar o personagem",  width / 2, height / 2 + 50);
+    this.message.show("Colete os lanches pelo caminho",             width / 2, height / 2 + 100);
+    this.message.show("Se a comida acabar voce morre",              width / 2, height / 2 + 150);
+    this.message.show("Os obstáculos são quebráveis",               width / 2, height / 2 + 200);
+    this.message.show("Desenvolvido por José Antonio Gallo Junior", width / 2, height / 2 + 250);
+  }
+
+  NextLevel() {
+    // Avança para o próximo dia — Score é mantido (não reseta entre dias)
+    this.day++;
+    this.levelDone  = false;
+    this.dayMessage = true;
+    this._dayMsgTimer = 90;
+    this.board      = new GameBoard(64);
+    this.level      = new Level(this.day, this._itensForDay(), this._enemiesForDay(), this.board);
+    this._lastEnemyMove = millis();
+  }
+
+  GameOver() {
+    this.board.BackGround(0);
+    this.message.setText(fontZombie, 160, CENTER, [139, 0, 0]);
+    this.message.show("Voce Morreu", width / 2, height / 2 - 120);
+    this.message.show("De Fome",     width / 2, height / 2 + 60);
+    this.message.setText(fontArial, 44, CENTER, [255, 220, 0]);
+    let diasTxt = this.day === 1 ? "Voce sobreviveu apenas 1 dia." : `Voce sobreviveu ${this.day} dias.`;
+    this.message.show(diasTxt, width / 2, height / 2 + 160);
+    this.message.setText(fontArial, 32, CENTER, [255, 255, 255]);
+    this.message.show("Clique para voltar ao início", width / 2, height / 2 + 230);
+  }
+
+  Paused() {
+    this.board.BackGround(0);
+    this.message.setText(fontZombie, 150, CENTER, [139, 0, 0]);
+    this.message.show("Jogo Pausado", width / 2, height / 2);
+    this.message.setText(fontArial, 40, CENTER, [255, 255, 255]);
+    this.message.show("Clique para continuar!", width / 2, 650);
+  }
+
+  // Tick de lógica dos inimigos — chamado antes de qualquer desenho
+  TickEnemies() {
+    if (millis() - this._lastEnemyMove >= this._enemyInterval) {
+      this._moveEnemiesAuto();
+      this._lastEnemyMove = millis();
+    }
+  }
+
+  ShowLevel() {
+    for (let b of this.level.breakables) b.draw();
+    for (let it of this.level.itens)     it.draw();
+    for (let e of this.level.enemies)    e.draw();
+    this.level.character.draw();
+
+    // HUD — desenhado dentro do translate do board, coords relativas ao board
+    // Linha superior: Dia • Comida Restante
+    this.message.setText(fontArial, 28, LEFT, [255, 220, 0]);
+    this.message.show("Dia " + this.day + "  •  Comida Restante: " + this.Score, 20, 40);
+    // Linha inferior: controles
+    this.message.setText(fontArial, 24, LEFT, [200, 200, 200]);
+    this.message.show("F1 - Ajuda        ←↑↓→ - Movimentar       A - Atacar      Mouse - Pausa", 20, this.board.height - 10);
+  }
+
+  MoveCharacter(keyCode) {
+    const x = this.level.character.posX;
+    const y = this.level.character.posY;
+    let newX = x, newY = y;
+
+    if (keyCode === LEFT_ARROW)  newX--;
+    if (keyCode === RIGHT_ARROW) newX++;
+    if (keyCode === UP_ARROW)    newY--;
+    if (keyCode === DOWN_ARROW)  newY++;
+
+    // Saída
+    if (newX === this.board.cols - 1 && newY === 2) {
+      this.board.boardMatrix[y][x] = 0;
+      this.level.character.move(newX, newY);
+      this.levelDone = true;
+      return;
+    }
+
+    // Garante que a célula atual do jogador está correta antes de mover
+    this.board.boardMatrix[y][x] = 2;
+    const destino = this.board.boardMatrix[newY][newX];
+
+    if (destino === 0) {
+      this.board.boardMatrix[y][x] = 0;
+      this.level.character.move(newX, newY);
+      this.board.boardMatrix[newY][newX] = 2;
+      this.Score--;
+    } else if (destino === 3) {
+      const item = this.level.getConsumable(newX, newY);
+      if (item) this.Score += item.eat();
+      this.board.boardMatrix[y][x] = 0;
+      this.level.character.move(newX, newY);
+      this.board.boardMatrix[newY][newX] = 2;
+    } else if (destino === 4) {
+      // Tentou andar em cima de um inimigo → leva dano, não move
+      this._playerTakesHit();
+    }
+    // Destino 1 (parede) ou 5 (quebrável): ignora movimento
+  }
+
+  CharAttack() {
+    const x    = this.level.character.posX;
+    const y    = this.level.character.posY;
+    const newX = x + 1;
+    const newY = y;
+    const target = this.board.boardMatrix[newY][newX];
+
+    this.level.character.setAttacking();
+    this.Score -= 2;
+
+    if (target === 4) {
+      const e = this.level.getEnemie(newX, newY);
+      if (e && e.takeDamage()) {
+        this.level.enemies = this.level.enemies.filter(en => en !== e);
+        this.board.boardMatrix[newY][newX] = 0;
+        this.Score += 15; // recompensa por matar zumbi
+      }
+    } else if (target === 5) {
+      const b = this.level.getBreakable(newX, newY);
+      if (b && b.breakBlock()) {
+        this.board.boardMatrix[newY][newX] = 0;
+        this.level.breakables = this.level.breakables.filter(br => br !== b);
+      }
+    }
+  }
+
+  CheckScore() {
+    if (this.Score <= 0) this.endGame = true;
+  }
+
+  _playerTakesHit() {
+    this.Score -= 10;
+    this.level.character.setHurt();
+    if (this.Score <= 0) this.endGame = true;
+  }
+
+  // Movimentação autônoma: chamada por timer, independente do teclado
+  _moveEnemiesAuto() {
+    for (let enemy of this.level.enemies) {
+      if (this.endGame) break; // para o loop se o jogador morreu no meio
+      this._moveOneEnemy(enemy);
+    }
+  }
+
+  // Movimentação também acionada pelo movimento do jogador (reatividade)
+  _moveEnemiesReactive() {
+    for (let enemy of this.level.enemies) {
+      // Só reage se estiver perto (distância de Chebyshev <= 5)
+      const dx = Math.abs(this.level.character.posX - enemy.posX);
+      const dy = Math.abs(this.level.character.posY - enemy.posY);
+      if (Math.max(dx, dy) <= 5) {
+        this._moveOneEnemy(enemy);
+      }
+    }
+  }
+
+  _moveOneEnemy(enemy) {
+    const charX = this.level.character.posX;
+    const charY = this.level.character.posY;
+    const dx = charX - enemy.posX;
+    const dy = charY - enemy.posY;
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    // Adjacente → ataca (não se move, só aplica dano)
+    const isAdjacent = (absDx === 1 && dy === 0) || (absDy === 1 && dx === 0);
+    if (isAdjacent) {
+      enemy.setAttacking();
+      this._playerTakesHit();
+      return;
+    }
+
+    let moves = this._candidateMoves(dx, dy, absDx, absDy);
+
+    for (let [nx, ny] of moves) {
+      let newX = enemy.posX + nx;
+      let newY = enemy.posY + ny;
+
+      if (newX < 0 || newY < 0 || newX >= this.board.cols || newY >= this.board.rows) continue;
+
+      const destino = this.board.boardMatrix[newY][newX];
+
+      // Só move para célula estritamente vazia — nunca sobrescreve o jogador (2)
+      if (destino === 0) {
+        this.board.boardMatrix[enemy.posY][enemy.posX] = 0;
+        enemy.move(newX, newY);
+        this.board.boardMatrix[newY][newX] = 4;
+        // Garante que a posição real do jogador continua marcada como 2
+        // (defesa contra estados inconsistentes de tick anterior)
+        this.board.boardMatrix[charY][charX] = 2;
+        break;
+      }
+    }
+  }
+
+  // Retorna lista de deltas [dx,dy] priorizando direção ao jogador,
+  // com fallbacks perpendiculares para contornar obstáculos
+  _candidateMoves(dx, dy, absDx, absDy) {
+    let primary, perpA, perpB;
+
+    if (absDx >= absDy) {
+      primary = [dx > 0 ? 1 : -1, 0];
+      perpA   = [0, dy >= 0 ? 1 : -1];
+      perpB   = [0, dy >= 0 ? -1 : 1];
+    } else {
+      primary = [0, dy > 0 ? 1 : -1];
+      perpA   = [dx >= 0 ? 1 : -1, 0];
+      perpB   = [dx >= 0 ? -1 : 1, 0];
+    }
+
+    // 20% de chance de tentar perpendicular primeiro (comportamento menos previsível)
+    if (random() < 0.2) {
+      return [perpA, primary, perpB];
+    }
+    return [primary, perpA, perpB];
+  }
+}
+
+// -------------------- Character --------------------
+
+class Character extends Base {
+  constructor(x, y, framesIdle, framesAttack, framesHurt, pixelSize) {
+    super(x, y, pixelSize);
+    this.numFramesIdle   = framesIdle;
+    this.numFramesAttack = framesAttack;
+    this.numFramesHurt   = framesHurt;
+    this.currentFrame    = 0;
+    this.hurtTimer       = 0;   // frames de flash vermelho na tela
+    this.attackTimer     = 0;   // frames de animação de ataque
+
+    this.idleSprites   = Array.from({ length: framesIdle },   (_, i) => imgCache[`char_idle_${i + 1}`]);
+    this.attackSprites = Array.from({ length: framesAttack }, (_, i) => imgCache[`char_attack_${i + 1}`]);
+    this.hurtSprites   = Array.from({ length: framesHurt },   (_, i) => imgCache[`char_hurt_${i + 1}`]);
+  }
+
+  move(x, y) { this.posX = x; this.posY = y; }
+
+  setHurt()     { this.hurtTimer = this.numFramesHurt; } // sempre reseta para o máximo correto
+  setAttacking() { this.attackTimer = 2; }
+
+  draw() {
+    this.currentFrame = (this.currentFrame + 1) % this.numFramesIdle;
+
+    if (this.attackTimer > 0) {
+      // Anima ataque — índice nunca negativo
+      let f = (this.numFramesAttack - this.attackTimer % this.numFramesAttack) % this.numFramesAttack;
+      image(this.attackSprites[f], this.posX * this.pixelSize, this.posY * this.pixelSize);
+      this.attackTimer--;
+    } else if (this.hurtTimer > 0) {
+      // Anima hurt — índice cicla de 0..numFramesHurt-1 sem nunca ser negativo
+      let f = (this.numFramesHurt - this.hurtTimer % this.numFramesHurt) % this.numFramesHurt;
+      image(this.hurtSprites[f], this.posX * this.pixelSize, this.posY * this.pixelSize);
+      // hurtTimer é decrementado no draw() global para sincronizar com o overlay
+    } else {
+      image(this.idleSprites[this.currentFrame], this.posX * this.pixelSize, this.posY * this.pixelSize);
+    }
+  }
+}
+
+// -------------------- Enemie --------------------
+
+class Enemie extends Base {
+  constructor(x, y, framesIdle, framesAttack, type, pixelSize) {
+    super(x, y, pixelSize);
+    this.numFramesIdle   = framesIdle;
+    this.numFramesAttack = framesAttack;
+    this.currentFrame    = 0;
+    this.hp              = 3;
+    this.flashTimer      = 0;  // flash vermelho no sprite do zumbi ao levar dano
+    this.attackTimer     = 0;  // frames de animação de ataque
+    this.type            = type;
+
+    this.idleSprites   = Array.from({ length: framesIdle },   (_, i) => imgCache[`zombie${type}_idle_${i + 1}`]);
+    this.attackSprites = Array.from({ length: framesAttack }, (_, i) => imgCache[`zombie${type}_attack_${i + 1}`]);
+  }
+
+  move(x, y) { this.posX = x; this.posY = y; }
+
+  setAttacking() { this.attackTimer = 2; }
+
+  draw() {
+    this.currentFrame = (this.currentFrame + 1) % this.numFramesIdle;
+
+    // Escolhe sprite e tint de acordo com o estado atual (antes de decrementar)
+    let spriteImg;
+    if (this.attackTimer > 0) {
+      let f = (this.numFramesAttack - this.attackTimer % this.numFramesAttack) % this.numFramesAttack;
+      spriteImg = this.attackSprites[f];
+      tint(255, 180, 0); // laranja ao atacar
+      this.attackTimer--;
+    } else if (this.flashTimer > 0) {
+      spriteImg = this.idleSprites[this.currentFrame];
+      tint(255, 80, 80); // vermelho ao levar dano
+      this.flashTimer--;
+    } else {
+      spriteImg = this.idleSprites[this.currentFrame];
+      noTint();
+    }
+
+    image(spriteImg, this.posX * this.pixelSize, this.posY * this.pixelSize);
+
+    // Desliga tint antes de desenhar a barra de vida (formas geométricas também são afetadas)
+    noTint();
+
+    // Barra de vida
+    noStroke();
+    fill(255, 0, 0);
+    rect(this.posX * this.pixelSize, this.posY * this.pixelSize - 10, this.pixelSize, 5);
+    fill(0, 255, 0);
+    rect(this.posX * this.pixelSize, this.posY * this.pixelSize - 10, this.pixelSize * (this.hp / 3), 5);
+  }
+
+  takeDamage() {
+    this.hp--;
+    this.flashTimer = 3;
+    return this.hp <= 0;
+  }
+}
+
+// -------------------- Consumable --------------------
+
+class Consumable extends Base {
+  constructor(x, y, pixelSize, points, tipo) {
+    super(x, y, pixelSize);
+    this.status = 1;
+    this.points = points;
+    this.imagem = imgCache[tipo];
+  }
+
+  draw() {
+    if (this.status === 1)
+      image(this.imagem, this.posX * this.pixelSize, this.posY * this.pixelSize);
+  }
+
+  eat() { this.status = 0; return this.points; }
+}
+
+// -------------------- Breakable --------------------
+
+class Breakable extends Base {
+  constructor(x, y, pixelSize, numFrames, folder) {
+    super(x, y, pixelSize);
+    this.status    = 1;
+    this.numFrames = numFrames;
+    this.images    = Array.from({ length: numFrames }, (_, i) => imgCache[`break${folder}_${i + 1}`]);
+  }
+
+  draw() {
+    if (this.status <= this.numFrames)
+      image(this.images[this.status - 1], this.posX * this.pixelSize, this.posY * this.pixelSize);
+  }
+
+  breakBlock() { this.status++; return this.status > this.numFrames; }
+}
