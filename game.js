@@ -4,6 +4,17 @@ let game;
 let fontZombie, fontArial;
 let imgCache = {};
 
+// Detecta mobile/tablet pelo user agent e pelo tamanho de tela
+const isMobile = /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent)
+               || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
+
+// Dimensões e estado dos controles virtuais (calculados no setup)
+let mobileUI = {
+  dpad: { x: 0, y: 0, size: 0 },      // centro e tamanho do D-pad
+  attackBtn: { x: 0, y: 0, r: 0 },    // centro e raio do botão de ataque
+  activeTouch: null,                   // identificador do toque no D-pad
+};
+
 function preload() {
   fontZombie = loadFont("fonts/Zombie_Holocaust.ttf");
   fontArial  = loadFont("fonts/Arial.ttf");
@@ -35,6 +46,15 @@ function setup() {
   createCanvas(windowWidth, windowHeight);
   frameRate(6);
   game = new Game();
+
+  if (isMobile) {
+    // D-pad no canto inferior esquerdo
+    const pad = Math.min(windowWidth, windowHeight) * 0.22;
+    mobileUI.dpad = { x: pad * 0.9, y: windowHeight - pad * 0.9, size: pad };
+    // Botão de ataque no canto inferior direito
+    const r = pad * 0.38;
+    mobileUI.attackBtn = { x: windowWidth - r * 2, y: windowHeight - r * 2, r };
+  }
 }
 
 function draw() {
@@ -99,12 +119,15 @@ function draw() {
     game.message.setText(fontArial, 36, CENTER, [255, 255, 255]);
     game.message.show("Sobreviva e chegue à saída!", width / 2, height / 2 + 110);
     game.message.setText(fontArial, 24, CENTER, [160, 160, 160]);
-    game.message.show("Clique para continuar", width / 2, height / 2 + 170);
+    game.message.show(isMobile ? "Toque para continuar" : "Clique para continuar", width / 2, height / 2 + 170);
     game._dayMsgTimer--;
     if (game._dayMsgTimer <= 0) game.dayMessage = false;
   }
 
   game.CheckScore();
+
+  // Desenha controles virtuais no mobile (sempre por cima, fora de qualquer push/pop)
+  if (isMobile) drawMobileControls();
 }
 
 function keyPressed() {
@@ -121,6 +144,7 @@ function keyPressed() {
 }
 
 function mousePressed() {
+  if (isMobile) return; // mobile usa touchStarted, não mousePressed
   if (game.intro) {
     game.intro = false;
   } else if (game.help) {
@@ -129,11 +153,156 @@ function mousePressed() {
     game.Restart();
     game.intro = true;
   } else if (game.dayMessage) {
-    // Clique dispensa o banner do dia imediatamente
     game.dayMessage = false;
   } else {
     game.paused = !game.paused;
   }
+}
+
+// -------------------- Controles Mobile --------------------
+
+function drawMobileControls() {
+  if (game.intro || game.endGame || game.help || game.paused || game.dayMessage) return;
+
+  const { dpad, attackBtn } = mobileUI;
+  const s = dpad.size;
+  const btn = s * 0.28; // tamanho de cada seta
+
+  noStroke();
+
+  // Fundo do D-pad (disco semitransparente)
+  fill(0, 0, 0, 100);
+  ellipse(dpad.x, dpad.y, s * 1.1, s * 1.1);
+
+  // Setas do D-pad
+  fill(255, 255, 255, 180);
+  // Cima
+  triangle(
+    dpad.x,          dpad.y - s * 0.42,
+    dpad.x - btn*0.6, dpad.y - s * 0.15,
+    dpad.x + btn*0.6, dpad.y - s * 0.15
+  );
+  // Baixo
+  triangle(
+    dpad.x,          dpad.y + s * 0.42,
+    dpad.x - btn*0.6, dpad.y + s * 0.15,
+    dpad.x + btn*0.6, dpad.y + s * 0.15
+  );
+  // Esquerda
+  triangle(
+    dpad.x - s * 0.42, dpad.y,
+    dpad.x - s * 0.15, dpad.y - btn*0.6,
+    dpad.x - s * 0.15, dpad.y + btn*0.6
+  );
+  // Direita
+  triangle(
+    dpad.x + s * 0.42, dpad.y,
+    dpad.x + s * 0.15, dpad.y - btn*0.6,
+    dpad.x + s * 0.15, dpad.y + btn*0.6
+  );
+
+  // Botão de ataque
+  fill(200, 50, 50, 200);
+  ellipse(attackBtn.x, attackBtn.y, attackBtn.r * 2, attackBtn.r * 2);
+  fill(255, 255, 255, 220);
+  textFont(fontArial, attackBtn.r * 0.7);
+  textAlign(CENTER, CENTER);
+  text("ATK", attackBtn.x, attackBtn.y);
+}
+
+// Converte toque no D-pad em keyCode equivalente
+function dpadDirection(tx, ty) {
+  const { dpad } = mobileUI;
+  const dx = tx - dpad.x;
+  const dy = ty - dpad.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist < dpad.size * 0.12) return null; // zona morta central
+  if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? RIGHT_ARROW : LEFT_ARROW;
+  return dy > 0 ? DOWN_ARROW : UP_ARROW;
+}
+
+function isOnDpad(tx, ty) {
+  const { dpad } = mobileUI;
+  const dx = tx - dpad.x, dy = ty - dpad.y;
+  return Math.sqrt(dx*dx + dy*dy) <= dpad.size * 0.55;
+}
+
+function isOnAttack(tx, ty) {
+  const { attackBtn } = mobileUI;
+  const dx = tx - attackBtn.x, dy = ty - attackBtn.y;
+  return Math.sqrt(dx*dx + dy*dy) <= attackBtn.r;
+}
+
+// Processa um toque como interação de jogo (telas de intro, pausa, etc.)
+function handleGameTouch(tx, ty) {
+  if (game.intro) {
+    game.intro = false;
+    return;
+  }
+  if (game.help) {
+    game.help = false;
+    return;
+  }
+  if (game.endGame) {
+    game.Restart();
+    game.intro = true;
+    return;
+  }
+  if (game.dayMessage) {
+    game.dayMessage = false;
+    return;
+  }
+  // Toque fora dos controles → pausa
+  if (!isOnDpad(tx, ty) && !isOnAttack(tx, ty)) {
+    game.paused = !game.paused;
+  }
+}
+
+function touchStarted() {
+  if (!isMobile) return true;
+
+  for (let t of touches) {
+    const tx = t.x, ty = t.y;
+
+    // Telas de estado (intro, gameover etc.) — qualquer toque avança
+    if (game.intro || game.help || game.endGame || game.dayMessage || game.paused) {
+      handleGameTouch(tx, ty);
+      return false;
+    }
+
+    if (isOnAttack(tx, ty)) {
+      if (!game.paused && !game.dayMessage) game.CharAttack();
+    } else if (isOnDpad(tx, ty)) {
+      // Registra toque no D-pad e processa direção imediatamente
+      mobileUI.activeTouch = t.id;
+      const dir = dpadDirection(tx, ty);
+      if (dir && !game.paused && !game.dayMessage) game.MoveCharacter(dir);
+    } else {
+      handleGameTouch(tx, ty);
+    }
+  }
+  return false; // previne scroll
+}
+
+function touchMoved() {
+  if (!isMobile) return true;
+  // Permite deslizar no D-pad para mudar direção continuamente
+  for (let t of touches) {
+    if (t.id === mobileUI.activeTouch || isOnDpad(t.x, t.y)) {
+      // throttle: só move se o frameCount avançou (evita spam)
+      const dir = dpadDirection(t.x, t.y);
+      if (dir && !game.paused && !game.dayMessage && frameCount % 2 === 0) {
+        game.MoveCharacter(dir);
+      }
+    }
+  }
+  return false;
+}
+
+function touchEnded() {
+  if (!isMobile) return true;
+  mobileUI.activeTouch = null;
+  return false;
 }
 
 // -------------------- Classes --------------------
@@ -324,7 +493,7 @@ class Game {
     this.message.show("COMERAM MEU", width / 2, 325);
     this.message.show("HAMBURGUER",  width / 2, 500);
     this.message.setText(fontArial, 40, CENTER, [255, 255, 255]);
-    this.message.show("Clique para começar!", width / 2, 650);
+    this.message.show(isMobile ? "Toque para começar!" : "Clique para começar!", width / 2, 650);
     this.message.show("Desenvolvido por José Antonio Gallo Junior", width / 2, 700);
   }
 
@@ -336,7 +505,7 @@ class Game {
     this.message.show("Atravesse o cenário e chegue à Saída",       width / 2, height / 2);
     this.message.show("Use as setas para movimentar o personagem",  width / 2, height / 2 + 50);
     this.message.show("Colete os lanches pelo caminho",             width / 2, height / 2 + 100);
-    this.message.show("Se a comida acabar voce morre",              width / 2, height / 2 + 150);
+    this.message.show("Se a comida acabar você morre",              width / 2, height / 2 + 150);
     this.message.show("Os obstáculos são quebráveis",               width / 2, height / 2 + 200);
     this.message.show("Desenvolvido por José Antonio Gallo Junior", width / 2, height / 2 + 250);
   }
@@ -355,10 +524,10 @@ class Game {
   GameOver() {
     this.board.BackGround(0);
     this.message.setText(fontZombie, 160, CENTER, [139, 0, 0]);
-    this.message.show("Voce Morreu", width / 2, height / 2 - 120);
+    this.message.show("Você Morreu", width / 2, height / 2 - 120);
     this.message.show("De Fome",     width / 2, height / 2 + 60);
     this.message.setText(fontArial, 44, CENTER, [255, 220, 0]);
-    let diasTxt = this.day === 1 ? "Voce sobreviveu apenas 1 dia." : `Voce sobreviveu ${this.day} dias.`;
+    let diasTxt = this.day === 1 ? "Você sobreviveu apenas 1 dia." : `Você sobreviveu ${this.day} dias.`;
     this.message.show(diasTxt, width / 2, height / 2 + 160);
     this.message.setText(fontArial, 32, CENTER, [255, 255, 255]);
     this.message.show("Clique para voltar ao início", width / 2, height / 2 + 230);
@@ -369,7 +538,7 @@ class Game {
     this.message.setText(fontZombie, 150, CENTER, [139, 0, 0]);
     this.message.show("Jogo Pausado", width / 2, height / 2);
     this.message.setText(fontArial, 40, CENTER, [255, 255, 255]);
-    this.message.show("Clique para continuar!", width / 2, 650);
+    this.message.show(isMobile ? "Toque para continuar!" : "Clique para continuar!", width / 2, 650);
   }
 
   // Tick de lógica dos inimigos — chamado antes de qualquer desenho
