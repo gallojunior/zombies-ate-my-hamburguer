@@ -312,6 +312,20 @@ function touchEnded() {
 
 // -------------------- Classes --------------------
 
+// Desenha um sprite com flip horizontal opcional
+// facingLeft=true espelha o sprite no eixo X sem precisar de sprite extra
+function drawSprite(img, x, y, size, facingLeft) {
+  if (!img) return;
+  push();
+  if (facingLeft) {
+    scale(-1, 1);
+    image(img, -(x + size), y);
+  } else {
+    image(img, x, y);
+  }
+  pop();
+}
+
 class Level {
   constructor(numero, numItens, numEnemies, board) {
     this.numero      = numero;
@@ -610,11 +624,12 @@ class Game {
   }
 
   CharAttack() {
-    const x    = this.level.character.posX;
-    const y    = this.level.character.posY;
-    const newX = x + 1;
+    const x  = this.level.character.posX;
+    const y  = this.level.character.posY;
+    // Ataca na direção que o personagem está virado
+    const newX = this.level.character.facingLeft ? x - 1 : x + 1;
     const newY = y;
-    const target = this.board.boardMatrix[newY][newX];
+    const target = this.board.boardMatrix[newY] && this.board.boardMatrix[newY][newX];
 
     this.level.character.setAttacking();
     this.Score -= 2;
@@ -624,7 +639,7 @@ class Game {
       if (e && e.takeDamage()) {
         this.level.enemies = this.level.enemies.filter(en => en !== e);
         this.board.boardMatrix[newY][newX] = 0;
-        this.Score += 15; // recompensa por matar zumbi
+        this.Score += 3;
       }
     } else if (target === 5) {
       const b = this.level.getBreakable(newX, newY);
@@ -736,34 +751,38 @@ class Character extends Base {
     this.numFramesAttack = framesAttack;
     this.numFramesHurt   = framesHurt;
     this.currentFrame    = 0;
-    this.hurtTimer       = 0;   // frames de flash vermelho na tela
-    this.attackTimer     = 0;   // frames de animação de ataque
+    this.hurtTimer       = 0;
+    this.attackTimer     = 0;
+    this.facingLeft      = false; // sprite virado para esquerda?
 
     this.idleSprites   = Array.from({ length: framesIdle },   (_, i) => imgCache[`char_idle_${i + 1}`]);
     this.attackSprites = Array.from({ length: framesAttack }, (_, i) => imgCache[`char_attack_${i + 1}`]);
     this.hurtSprites   = Array.from({ length: framesHurt },   (_, i) => imgCache[`char_hurt_${i + 1}`]);
   }
 
-  move(x, y) { this.posX = x; this.posY = y; }
+  move(x, y) {
+    if (x !== this.posX) this.facingLeft = x < this.posX;
+    this.posX = x;
+    this.posY = y;
+  }
 
-  setHurt()     { this.hurtTimer = this.numFramesHurt; } // sempre reseta para o máximo correto
+  setHurt()      { this.hurtTimer = this.numFramesHurt; }
   setAttacking() { this.attackTimer = 2; }
 
   draw() {
     this.currentFrame = (this.currentFrame + 1) % this.numFramesIdle;
+    const px = this.posX * this.pixelSize;
+    const py = this.posY * this.pixelSize;
 
     if (this.attackTimer > 0) {
-      // Anima ataque — índice nunca negativo
       let f = (this.numFramesAttack - this.attackTimer % this.numFramesAttack) % this.numFramesAttack;
-      image(this.attackSprites[f], this.posX * this.pixelSize, this.posY * this.pixelSize);
+      drawSprite(this.attackSprites[f], px, py, this.pixelSize, this.facingLeft);
       this.attackTimer--;
     } else if (this.hurtTimer > 0) {
-      // Anima hurt — índice cicla de 0..numFramesHurt-1 sem nunca ser negativo
       let f = (this.numFramesHurt - this.hurtTimer % this.numFramesHurt) % this.numFramesHurt;
-      image(this.hurtSprites[f], this.posX * this.pixelSize, this.posY * this.pixelSize);
-      // hurtTimer é decrementado no draw() global para sincronizar com o overlay
+      drawSprite(this.hurtSprites[f], px, py, this.pixelSize, this.facingLeft);
     } else {
-      image(this.idleSprites[this.currentFrame], this.posX * this.pixelSize, this.posY * this.pixelSize);
+      drawSprite(this.idleSprites[this.currentFrame], px, py, this.pixelSize, this.facingLeft);
     }
   }
 }
@@ -777,48 +796,55 @@ class Enemie extends Base {
     this.numFramesAttack = framesAttack;
     this.currentFrame    = 0;
     this.hp              = 3;
-    this.flashTimer      = 0;  // flash vermelho no sprite do zumbi ao levar dano
-    this.attackTimer     = 0;  // frames de animação de ataque
+    this.flashTimer      = 0;
+    this.attackTimer     = 0;
+    this.facingLeft      = true;  // sprite original olha para a esquerda; sem flip ao ir para esquerda
     this.type            = type;
 
     this.idleSprites   = Array.from({ length: framesIdle },   (_, i) => imgCache[`zombie${type}_idle_${i + 1}`]);
     this.attackSprites = Array.from({ length: framesAttack }, (_, i) => imgCache[`zombie${type}_attack_${i + 1}`]);
   }
 
-  move(x, y) { this.posX = x; this.posY = y; }
+  move(x, y) {
+    if (x !== this.posX) this.facingLeft = x < this.posX;
+    this.posX = x;
+    this.posY = y;
+  }
 
   setAttacking() { this.attackTimer = 2; }
 
   draw() {
     this.currentFrame = (this.currentFrame + 1) % this.numFramesIdle;
+    const px = this.posX * this.pixelSize;
+    const py = this.posY * this.pixelSize;
 
-    // Escolhe sprite e tint de acordo com o estado atual (antes de decrementar)
     let spriteImg;
     if (this.attackTimer > 0) {
       let f = (this.numFramesAttack - this.attackTimer % this.numFramesAttack) % this.numFramesAttack;
       spriteImg = this.attackSprites[f];
-      tint(255, 180, 0); // laranja ao atacar
+      tint(255, 180, 0);
       this.attackTimer--;
     } else if (this.flashTimer > 0) {
       spriteImg = this.idleSprites[this.currentFrame];
-      tint(255, 80, 80); // vermelho ao levar dano
+      tint(255, 80, 80);
       this.flashTimer--;
     } else {
       spriteImg = this.idleSprites[this.currentFrame];
       noTint();
     }
 
-    image(spriteImg, this.posX * this.pixelSize, this.posY * this.pixelSize);
+    // Sprite do zumbi olha para esquerda por padrão:
+    // flip quando NÃO está indo para esquerda (ou seja, vai para direita)
+    drawSprite(spriteImg, px, py, this.pixelSize, !this.facingLeft);
 
-    // Desliga tint antes de desenhar a barra de vida (formas geométricas também são afetadas)
     noTint();
 
-    // Barra de vida
+    // Barra de vida — posição fixa no tile, não afetada pelo flip
     noStroke();
     fill(255, 0, 0);
-    rect(this.posX * this.pixelSize, this.posY * this.pixelSize - 10, this.pixelSize, 5);
+    rect(px, py - 10, this.pixelSize, 5);
     fill(0, 255, 0);
-    rect(this.posX * this.pixelSize, this.posY * this.pixelSize - 10, this.pixelSize * (this.hp / 3), 5);
+    rect(px, py - 10, this.pixelSize * (this.hp / 3), 5);
   }
 
   takeDamage() {
