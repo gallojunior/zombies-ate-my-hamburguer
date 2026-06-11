@@ -15,30 +15,35 @@ let mobileUI = {
   activeTouch: null,                   // identificador do toque no D-pad
 };
 
+// Carrega imagem com callback de erro — evita que preload trave indefinidamente
+function safeLoadImage(key, path) {
+  imgCache[key] = loadImage(path, null, () => console.warn("Falhou:", path));
+}
+
 function preload() {
-  fontZombie = loadFont("fonts/Zombie_Holocaust.ttf");
-  fontArial  = loadFont("fonts/Arial.ttf");
+  fontZombie = loadFont("fonts/Zombie_Holocaust.ttf", null, () => console.warn("Falhou: Zombie_Holocaust.ttf"));
+  fontArial  = loadFont("fonts/Arial.ttf",            null, () => console.warn("Falhou: Arial.ttf"));
 
-  imgCache["intro"] = loadImage("imagens/assets/intro.jpg");
-  imgCache["exit"]  = loadImage("imagens/assets/wall/exit.png");
-  for (let i = 1; i <= 3; i++) imgCache[`wall${i}`]  = loadImage(`imagens/assets/wall/wall${i}.png`);
-  for (let i = 1; i <= 8; i++) imgCache[`floor${i}`] = loadImage(`imagens/assets/floor/${i}.png`);
+  safeLoadImage("intro", "imagens/assets/intro.jpg");
+  safeLoadImage("exit",  "imagens/assets/wall/exit.png");
+  for (let i = 1; i <= 3; i++) safeLoadImage(`wall${i}`,  `imagens/assets/wall/wall${i}.png`);
+  for (let i = 1; i <= 8; i++) safeLoadImage(`floor${i}`, `imagens/assets/floor/${i}.png`);
 
-  imgCache["hamburguer"] = loadImage("imagens/assets/itens/hamburguer.png");
-  imgCache["coke"]       = loadImage("imagens/assets/itens/coke.png");
+  safeLoadImage("hamburguer", "imagens/assets/itens/hamburguer.png");
+  safeLoadImage("coke",       "imagens/assets/itens/coke.png");
 
   const breakFrames = [2, 2, 3, 3, 3];
   for (let f = 1; f <= 5; f++)
     for (let i = 1; i <= breakFrames[f - 1]; i++)
-      imgCache[`break${f}_${i}`] = loadImage(`imagens/assets/breakable/${f}/${i}.png`);
+      safeLoadImage(`break${f}_${i}`, `imagens/assets/breakable/${f}/${i}.png`);
 
-  for (let i = 1; i <= 6; i++) imgCache[`char_idle_${i}`]   = loadImage(`imagens/char/idle/${i}.png`);
-  for (let i = 1; i <= 2; i++) imgCache[`char_attack_${i}`] = loadImage(`imagens/char/attack/${i}.png`);
-  for (let i = 1; i <= 2; i++) imgCache[`char_hurt_${i}`]   = loadImage(`imagens/char/hurt/${i}.png`);
+  for (let i = 1; i <= 6; i++) safeLoadImage(`char_idle_${i}`,   `imagens/char/idle/${i}.png`);
+  for (let i = 1; i <= 2; i++) safeLoadImage(`char_attack_${i}`, `imagens/char/attack/${i}.png`);
+  for (let i = 1; i <= 2; i++) safeLoadImage(`char_hurt_${i}`,   `imagens/char/hurt/${i}.png`);
 
   for (let t = 0; t <= 1; t++) {
-    for (let i = 1; i <= 6; i++) imgCache[`zombie${t}_idle_${i}`]   = loadImage(`imagens/enemies/zombie${t}/idle/${i}.png`);
-    for (let i = 1; i <= 2; i++) imgCache[`zombie${t}_attack_${i}`] = loadImage(`imagens/enemies/zombie${t}/attack/${i}.png`);
+    for (let i = 1; i <= 6; i++) safeLoadImage(`zombie${t}_idle_${i}`,   `imagens/enemies/zombie${t}/idle/${i}.png`);
+    for (let i = 1; i <= 2; i++) safeLoadImage(`zombie${t}_attack_${i}`, `imagens/enemies/zombie${t}/attack/${i}.png`);
   }
 }
 
