@@ -17,12 +17,12 @@ let mobileUI = {
 
 // Carrega imagem com callback de erro — evita que preload trave indefinidamente
 function safeLoadImage(key, path) {
-  imgCache[key] = loadImage(path, null, () => console.warn("Falhou:", path));
+  imgCache[key] = loadImage(path, () => {}, () => console.warn("Falhou:", path));
 }
 
 function preload() {
-  fontZombie = loadFont("fonts/Zombie_Holocaust.ttf", null, () => console.warn("Falhou: Zombie_Holocaust.ttf"));
-  fontArial  = loadFont("fonts/Arial.ttf",            null, () => console.warn("Falhou: Arial.ttf"));
+  fontZombie = loadFont("fonts/Zombie_Holocaust.ttf", () => {}, () => console.warn("Falhou: Zombie_Holocaust.ttf"));
+  fontArial  = loadFont("fonts/Arial.ttf",            () => {}, () => console.warn("Falhou: Arial.ttf"));
 
   safeLoadImage("intro", "imagens/assets/intro.jpg");
   safeLoadImage("exit",  "imagens/assets/wall/exit.png");
