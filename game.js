@@ -8,6 +8,14 @@ let imgCache = {};
 const isMobile = /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent)
                || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
 
+// Tamanho do tile do grid — reduzido no mobile para caber mais área visível
+const PIXEL_SIZE = isMobile ? 32 : 64;
+
+// Reduz tamanho de fonte no mobile (telas pequenas)
+function fs(size) {
+  return isMobile ? Math.round(size * 0.5) : size;
+}
+
 // Dimensões e estado dos controles virtuais (calculados no setup)
 let mobileUI = {
   dpad: { x: 0, y: 0, size: 0 },      // centro e tamanho do D-pad
@@ -116,14 +124,16 @@ function draw() {
     fill(0, 0, 0, 180);
     rect(0, 0, width, height);
     // "DIA" em fontZombie (sem número, pois a fonte não tem algarismos)
-    game.message.setText(fontZombie, 180, CENTER, [139, 0, 0]);
-    game.message.show("Dia", width / 2 - 80, height / 2 - 30);
+    const dayOffset = isMobile ? 40 : 80;
+    const numOffset = isMobile ? 30 : 60;
+    game.message.setText(fontZombie, fs(180), CENTER, [139, 0, 0]);
+    game.message.show("Dia", width / 2 - dayOffset, height / 2 - 30);
     // número em fontArial ao lado
-    game.message.setText(fontArial, 160, LEFT, [139, 0, 0]);
-    game.message.show(String(game.day), width / 2 + 60, height / 2 - 30);
-    game.message.setText(fontArial, 36, CENTER, [255, 255, 255]);
+    game.message.setText(fontArial, fs(160), LEFT, [139, 0, 0]);
+    game.message.show(String(game.day), width / 2 + numOffset, height / 2 - 30);
+    game.message.setText(fontArial, fs(36), CENTER, [255, 255, 255]);
     game.message.show("Sobreviva e chegue à saída!", width / 2, height / 2 + 110);
-    game.message.setText(fontArial, 24, CENTER, [160, 160, 160]);
+    game.message.setText(fontArial, fs(24), CENTER, [160, 160, 160]);
     game.message.show(isMobile ? "Toque para continuar" : "Clique para continuar", width / 2, height / 2 + 170);
     game._dayMsgTimer--;
     if (game._dayMsgTimer <= 0) game.dayMessage = false;
@@ -319,9 +329,9 @@ function drawSprite(img, x, y, size, facingLeft) {
   push();
   if (facingLeft) {
     scale(-1, 1);
-    image(img, -(x + size), y);
+    image(img, -(x + size), y, size, size);
   } else {
-    image(img, x, y);
+    image(img, x, y, size, size);
   }
   pop();
 }
@@ -455,20 +465,20 @@ class GameBoard {
       for (let i = 0; i < this.rows; i++) {
         for (let j = 0; j < this.cols; j++) {
           if (i === 0 || j === 0 || i === this.rows - 1 || j === this.cols - 1) {
-            image(this.wallSprites[z++], j * this.pixelSize, i * this.pixelSize);
+            image(this.wallSprites[z++], j * this.pixelSize, i * this.pixelSize, this.pixelSize, this.pixelSize);
           } else {
-            image(this.floorSprites[y++], j * this.pixelSize, i * this.pixelSize);
+            image(this.floorSprites[y++], j * this.pixelSize, i * this.pixelSize, this.pixelSize, this.pixelSize);
           }
         }
       }
-      image(this.saida, (this.cols - 1) * this.pixelSize, 2 * this.pixelSize);
+      image(this.saida, (this.cols - 1) * this.pixelSize, 2 * this.pixelSize, this.pixelSize, this.pixelSize);
     }
   }
 }
 
 class Game {
   constructor() {
-    this.board      = new GameBoard(64);
+    this.board      = new GameBoard(PIXEL_SIZE);
     this.intro      = true;
     this.paused     = false;
     this.endGame    = false;
@@ -479,7 +489,7 @@ class Game {
     this.dayMessage = true;       // exibe "Dia X" no início de cada dia
     this._dayMsgTimer = 90;       // duração em ms (90 * ~166ms ≈ 15s a 6fps)
 
-    this.message = new TextControl(fontZombie, 32, CENTER, [255, 0, 0]);
+    this.message = new TextControl(fontZombie, fs(32), CENTER, [255, 0, 0]);
     this.level   = new Level(1, this._itensForDay(), this._enemiesForDay(), this.board);
 
     this._lastEnemyMove = millis();
@@ -500,27 +510,27 @@ class Game {
     this.day        = 1;
     this.dayMessage = true;
     this._dayMsgTimer = 90;
-    this.board      = new GameBoard(64);
+    this.board      = new GameBoard(PIXEL_SIZE);
     this.level      = new Level(1, this._itensForDay(), this._enemiesForDay(), this.board);
     this._lastEnemyMove = millis();
   }
 
   Intro() {
     this.board.BackGround(0);
-    this.message.setText(fontZombie, 150, CENTER, [139, 0, 0]);
+    this.message.setText(fontZombie, fs(150), CENTER, [139, 0, 0]);
     this.message.show("ZUMBIS",      width / 2, 150);
     this.message.show("COMERAM MEU", width / 2, 325);
     this.message.show("HAMBURGUER",  width / 2, 500);
-    this.message.setText(fontArial, 40, CENTER, [255, 255, 255]);
+    this.message.setText(fontArial, fs(40), CENTER, [255, 255, 255]);
     this.message.show(isMobile ? "Toque para começar!" : "Clique para começar!", width / 2, 650);
     this.message.show("Desenvolvido por José Antonio Gallo Junior", width / 2, 700);
   }
 
   ShowHelp() {
     this.board.BackGround(0);
-    this.message.setText(fontZombie, 150, CENTER, [139, 0, 0]);
+    this.message.setText(fontZombie, fs(150), CENTER, [139, 0, 0]);
     this.message.show("ajuda", width / 2, 200);
-    this.message.setText(fontArial, 40, CENTER, [255, 255, 255]);
+    this.message.setText(fontArial, fs(40), CENTER, [255, 255, 255]);
     this.message.show("Atravesse o cenário e chegue à Saída",       width / 2, height / 2);
     this.message.show("Use as setas para movimentar o personagem",  width / 2, height / 2 + 50);
     this.message.show("Colete os lanches pelo caminho",             width / 2, height / 2 + 100);
@@ -535,28 +545,28 @@ class Game {
     this.levelDone  = false;
     this.dayMessage = true;
     this._dayMsgTimer = 90;
-    this.board      = new GameBoard(64);
+    this.board      = new GameBoard(PIXEL_SIZE);
     this.level      = new Level(this.day, this._itensForDay(), this._enemiesForDay(), this.board);
     this._lastEnemyMove = millis();
   }
 
   GameOver() {
     this.board.BackGround(0);
-    this.message.setText(fontZombie, 160, CENTER, [139, 0, 0]);
-    this.message.show("Você Morreu", width / 2, height / 2 - 120);
+    this.message.setText(fontZombie, fs(160), CENTER, [139, 0, 0]);
+    this.message.show("VOCE MORREU", width / 2, height / 2 - 120);
     this.message.show("De Fome",     width / 2, height / 2 + 60);
-    this.message.setText(fontArial, 44, CENTER, [255, 220, 0]);
+    this.message.setText(fontArial, fs(44), CENTER, [255, 220, 0]);
     let diasTxt = this.day === 1 ? "Você sobreviveu apenas 1 dia." : `Você sobreviveu ${this.day} dias.`;
     this.message.show(diasTxt, width / 2, height / 2 + 160);
-    this.message.setText(fontArial, 32, CENTER, [255, 255, 255]);
+    this.message.setText(fontArial, fs(32), CENTER, [255, 255, 255]);
     this.message.show("Clique para voltar ao início", width / 2, height / 2 + 230);
   }
 
   Paused() {
     this.board.BackGround(0);
-    this.message.setText(fontZombie, 150, CENTER, [139, 0, 0]);
+    this.message.setText(fontZombie, fs(150), CENTER, [139, 0, 0]);
     this.message.show("Jogo Pausado", width / 2, height / 2);
-    this.message.setText(fontArial, 40, CENTER, [255, 255, 255]);
+    this.message.setText(fontArial, fs(40), CENTER, [255, 255, 255]);
     this.message.show(isMobile ? "Toque para continuar!" : "Clique para continuar!", width / 2, 650);
   }
 
@@ -576,10 +586,10 @@ class Game {
 
     // HUD — desenhado dentro do translate do board, coords relativas ao board
     // Linha superior: Dia • Comida Restante
-    this.message.setText(fontArial, 28, LEFT, [255, 220, 0]);
+    this.message.setText(fontArial, fs(28), LEFT, [255, 220, 0]);
     this.message.show("Dia " + this.day + "  •  Comida Restante: " + this.Score, 20, 40);
     // Linha inferior: controles
-    this.message.setText(fontArial, 24, LEFT, [200, 200, 200]);
+    this.message.setText(fontArial, fs(24), LEFT, [200, 200, 200]);
     this.message.show("F1 - Ajuda        ←↑↓→ - Movimentar       A - Atacar      Mouse - Pausa", 20, this.board.height - 10);
   }
 
@@ -639,7 +649,7 @@ class Game {
       if (e && e.takeDamage()) {
         this.level.enemies = this.level.enemies.filter(en => en !== e);
         this.board.boardMatrix[newY][newX] = 0;
-        this.Score += 3;
+        this.Score += 15;
       }
     } else if (target === 5) {
       const b = this.level.getBreakable(newX, newY);
@@ -866,7 +876,7 @@ class Consumable extends Base {
 
   draw() {
     if (this.status === 1)
-      image(this.imagem, this.posX * this.pixelSize, this.posY * this.pixelSize);
+      image(this.imagem, this.posX * this.pixelSize, this.posY * this.pixelSize, this.pixelSize, this.pixelSize);
   }
 
   eat() { this.status = 0; return this.points; }
@@ -884,7 +894,7 @@ class Breakable extends Base {
 
   draw() {
     if (this.status <= this.numFrames)
-      image(this.images[this.status - 1], this.posX * this.pixelSize, this.posY * this.pixelSize);
+      image(this.images[this.status - 1], this.posX * this.pixelSize, this.posY * this.pixelSize, this.pixelSize, this.pixelSize);
   }
 
   breakBlock() { this.status++; return this.status > this.numFrames; }
