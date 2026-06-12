@@ -21,7 +21,14 @@ let mobileUI = {
   dpad: { x: 0, y: 0, size: 0 },      // centro e tamanho do D-pad
   attackBtn: { x: 0, y: 0, r: 0 },    // centro e raio do botão de ataque
   activeTouch: null,                   // identificador do toque no D-pad
+  lastMoveTime: 0,                     // millis() do último movimento processado
+  lastAttackTime: 0,                   // millis() do último ataque processado
 };
+
+// Tempo mínimo (ms) entre movimentos/ataques disparados por toque —
+// evita que múltiplos eventos de touch no mesmo "tap" movam vários tiles de uma vez
+const TOUCH_MOVE_COOLDOWN_MS   = 180;
+const TOUCH_ATTACK_COOLDOWN_MS = 250;
 
 // Carrega imagem com callback de erro — evita que preload trave indefinidamente
 function safeLoadImage(key, path) {
@@ -286,12 +293,20 @@ function touchStarted() {
     }
 
     if (isOnAttack(tx, ty)) {
-      if (!game.paused && !game.dayMessage) game.CharAttack();
+      const now = millis();
+      if (!game.paused && !game.dayMessage && now - mobileUI.lastAttackTime >= TOUCH_ATTACK_COOLDOWN_MS) {
+        game.CharAttack();
+        mobileUI.lastAttackTime = now;
+      }
     } else if (isOnDpad(tx, ty)) {
       // Registra toque no D-pad e processa direção imediatamente
       mobileUI.activeTouch = t.id;
       const dir = dpadDirection(tx, ty);
-      if (dir && !game.paused && !game.dayMessage) game.MoveCharacter(dir);
+      const now = millis();
+      if (dir && !game.paused && !game.dayMessage && now - mobileUI.lastMoveTime >= TOUCH_MOVE_COOLDOWN_MS) {
+        game.MoveCharacter(dir);
+        mobileUI.lastMoveTime = now;
+      }
     } else {
       handleGameTouch(tx, ty);
     }
@@ -301,13 +316,15 @@ function touchStarted() {
 
 function touchMoved() {
   if (!isMobile) return true;
-  // Permite deslizar no D-pad para mudar direção continuamente
+  // Permite deslizar no D-pad para mudar direção continuamente,
+  // mas respeitando o mesmo cooldown por tempo real do touchStarted
   for (let t of touches) {
     if (t.id === mobileUI.activeTouch || isOnDpad(t.x, t.y)) {
-      // throttle: só move se o frameCount avançou (evita spam)
       const dir = dpadDirection(t.x, t.y);
-      if (dir && !game.paused && !game.dayMessage && frameCount % 2 === 0) {
+      const now = millis();
+      if (dir && !game.paused && !game.dayMessage && now - mobileUI.lastMoveTime >= TOUCH_MOVE_COOLDOWN_MS) {
         game.MoveCharacter(dir);
+        mobileUI.lastMoveTime = now;
       }
     }
   }
